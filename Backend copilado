@@ -1,0 +1,328 @@
+# Club Presalud Pro – Backend (Producción)
+
+A continuación, todo el código listo para copy & paste, organizado por archivo.
+
+---
+
+## package.json
+```json
+{
+  "name": "club-presalud-pro-backend",
+  "version": "1.0.0",
+  "main": "dist/app.js",
+  "scripts": {
+    "dev": "ts-node-dev src/app.ts",
+    "build": "tsc",
+    "start": "node dist/app.js"
+  },
+  "dependencies": {
+    "axios": "^1.4.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.0",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.0",
+    "nodemailer": "^6.9.1",
+    "pdfkit": "^0.13.0",
+    "prisma": "^4.10.0",
+    "@prisma/client": "^4.10.0",
+    "twilio": "^4.11.1"
+  },
+  "devDependencies": {
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^4.8.4"
+  }
+}
+```
+
+## tsconfig.json
+```json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "outDir": "dist",
+    "rootDir": "src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true
+  }
+}
+```
+
+## .env.example
+```dotenv
+PORT=4000
+JWT_SECRET=your_jwt_secret
+DATABASE_URL=postgresql://user:pass@host:5432/db
+ODOO_URL=https://mi-odoo.com
+ODOO_DB=mi_db
+ODOO_USER=api_user
+ODOO_PASS=api_pass
+STRIPE_KEY=sk_test_...
+MERCADOPAGO_KEY=mp_test_...
+OPENPAY_MERCHANT_ID=your_id
+OPENPAY_PRIVATE_KEY=your_key
+SMTP_HOST=smtp.mail.com
+SMTP_PORT=587
+SMTP_USER=email@mail.com
+SMTP_PASS=mailer_pass
+TWILIO_SID=ACxxxx
+TWILIO_AUTH_TOKEN=xxxx
+TWILIO_WHATSAPP_FROM=whatsapp:+1234567890
+TOOKAN_API_KEY=tookan_key
+CINCEL_API_KEY=cincel_key
+```
+
+## Dockerfile
+```dockerfile
+FROM node:18-alpine
+WORKDIR /usr/src/app
+COPY package*.json ./
+RUN npm ci --only=production
+COPY . .
+RUN npm run build
+EXPOSE 4000
+CMD ["node", "dist/app.js"]
+```
+
+## docker-compose.yml
+```yaml
+version: '3.8'
+services:
+  api:
+    build: .
+    env_file: .env.example
+    ports:
+      - "4000:4000"
+    depends_on:
+      - db
+  db:
+    image: postgres:14
+    restart: always
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: db
+    volumes:
+      - db_data:/var/lib/postgresql/data
+volumes:
+  db_data:
+```
+
+## ecosystem.config.js
+```js
+module.exports = {
+  apps: [
+    {
+      name: 'club-presalud-pro-backend',
+      script: 'dist/app.js',
+      instances: 'max',
+      exec_mode: 'cluster',
+      env: { NODE_ENV: 'production' }
+    }
+  ]
+};
+```
+
+## prisma/schema.prisma
+```prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           Int       @id @default(autoincrement())
+  name         String
+  email        String    @unique
+  password     String
+  prescriptions Prescription[]
+  orders       Order[]
+}
+
+model Product {
+  id          Int         @id @default(autoincrement())
+  name        String
+  description String?
+  price       Float
+  stock       Int
+  orders      OrderItem[]
+}
+
+model Prescription {
+  id        Int      @id @default(autoincrement())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    Int
+  data      Json
+  createdAt DateTime @default(now())
+}
+
+model Cart {
+  id        Int      @id @default(autoincrement())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    Int
+  items     Json
+}
+
+model Order {
+  id           Int        @id @default(autoincrement())
+  user         User       @relation(fields: [userId], references: [id])
+  userId       Int
+  total        Float
+  status       String     @default("pending")
+  createdAt    DateTime   @default(now())
+  odooOrderId  Int?
+  items        OrderItem[]
+}
+
+model OrderItem {
+  id        Int     @id @default(autoincrement())
+  order     Order   @relation(fields: [orderId], references: [id])
+  orderId   Int
+  product   Product @relation(fields: [productId], references: [id])
+  productId Int
+  quantity  Int
+}
+```
+
+## src/app.ts
+```ts
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import routes from './routes';
+import { errorHandler } from './utils/errorHandler';
+
+dotenv.config();
+const app = express();
+app.use(cors());
+app.use(express.json());
+app.use('/api', routes);
+app.use(errorHandler);
+
+const PORT = process.env.PORT || 4000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+```
+
+## src/config/index.ts
+```ts
+import dotenv from 'dotenv';
+dotenv.config();
+
+export const config = {
+  jwtSecret: process.env.JWT_SECRET!,
+  dbUrl: process.env.DATABASE_URL!,
+  odoo: {
+    url: process.env.ODOO_URL!,
+    db: process.env.ODOO_DB!,
+    user: process.env.ODOO_USER!,
+    pass: process.env.ODOO_PASS!
+  },
+  stripeKey: process.env.STRIPE_KEY!,
+  mercadopagoKey: process.env.MERCADOPAGO_KEY!,
+  openpay: {
+    merchantId: process.env.OPENPAY_MERCHANT_ID!,
+    privateKey: process.env.OPENPAY_PRIVATE_KEY!
+  },
+  smtp: {
+    host: process.env.SMTP_HOST!,
+    port: +process.env.SMTP_PORT!,
+    user: process.env.SMTP_USER!,
+    pass: process.env.SMTP_PASS!
+  },
+  twilio: {
+    sid: process.env.TWILIO_SID!,
+    token: process.env.TWILIO_AUTH_TOKEN!,
+    whatsappFrom: process.env.TWILIO_WHATSAPP_FROM!
+  },
+  tookanKey: process.env.TOOKAN_API_KEY!,
+  cincelKey: process.env.CINCEL_API_KEY!
+};
+```
+
+## src/utils/logger.ts
+```ts
+export const logger = {
+  info: (msg: any) => console.log(msg),
+  error: (msg: any) => console.error(msg)
+};
+```
+
+## src/utils/errorHandler.ts
+```ts
+import { Request, Response, NextFunction } from 'express';
+export function errorHandler(err: any, req: Request, res: Response, next: NextFunction) {
+  console.error(err);
+  res.status(err.status || 500).json({ success: false, message: err.message || 'Server Error' });
+}
+```
+
+## src/middleware/authMiddleware.ts
+```ts
+import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
+import { config } from '../config';
+
+export interface AuthRequest extends Request { userId?: number }
+
+export function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ message: 'No token' });
+  try {
+    const payload = jwt.verify(token, config.jwtSecret) as any;
+    req.userId = payload.id;
+    next();
+  } catch {
+    res.status(401).json({ message: 'Invalid token' });
+  }
+}
+```
+
+## src/middleware/validationMiddleware.ts
+```ts
+import { Request, Response, NextFunction } from 'express';
+import { validationResult } from 'express-validator';
+
+export function validationMiddleware(req: Request, res: Response, next: NextFunction) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ success: false, errors: errors.array() });
+  }
+  next();
+}
+```
+
+## src/routes/index.ts
+```ts
+import { Router } from 'express';
+import userRoutes from './userRoutes';
+import productRoutes from './productRoutes';
+import prescriptionRoutes from './prescriptionRoutes';
+import cartRoutes from './cartRoutes';
+import orderRoutes from './orderRoutes';
+import odooRoutes from './odooRoutes';
+import paymentRoutes from './paymentRoutes';
+import notificationRoutes from './notificationRoutes';
+import trackingRoutes from './trackingRoutes';
+import signatureRoutes from './signatureRoutes';
+
+const router = Router();
+router.use('/users', userRoutes);
+router.use('/products', productRoutes);
+router.use('/prescriptions', prescriptionRoutes);
+router.use('/cart', cartRoutes);
+router.use('/orders', orderRoutes);
+router.use('/odoo', odooRoutes);
+router.use('/payments', paymentRoutes);
+router.use('/notifications', notificationRoutes);
+router.use('/tracking', trackingRoutes);
+router.use('/signature', signatureRoutes);
+
+export default router;
+```
+
+*Continúa en siguiente mensaje con controladores y servicios...*
